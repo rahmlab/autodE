@@ -1,5 +1,6 @@
 import numpy as np
 import autode.values as val
+from autode.values import Energy
 from copy import deepcopy
 from datetime import date
 from typing import Optional, Union, List, Sequence, Any, TypeVar, TYPE_CHECKING
@@ -296,7 +297,7 @@ class Species(AtomCollection):
             return None
 
         if self._graph is None:
-            make_graph(self)
+            make_graph(self,allow_invalid_valancies=True) #ADDED BY MARCO ",allow_invalid_valancies=True"
 
         return self._graph
 
@@ -1094,7 +1095,7 @@ class Species(AtomCollection):
         """
         Reset the molecular graph of this species by its connectivity
         """
-        return make_graph(self)
+        return make_graph(self,allow_invalid_valancies=True) #ADDED BY MARCO ",allow_invalid_valancies=True"
 
     def has_same_connectivity_as(self, other: "Species") -> bool:
         """
@@ -1235,6 +1236,7 @@ class Species(AtomCollection):
         calc.run()
 
         method_name = "" if method is None else method.name
+        logger.info(f'Printing xyz file from {self.name}_optimised_{method_name}')    #ADDED BY MARCO
         self.print_xyz_file(
             filename=f"{self.name}_optimised_{method_name}.xyz"
         )
@@ -1391,6 +1393,9 @@ class Species(AtomCollection):
         lmethod: Optional["Method"] = None,
         hmethod: Optional["Method"] = None,
         allow_connectivity_changes: bool = False,
+        constraints = None,     #ADDED BY MARCO
+        prune_higher_energy_sigma: float = 2.0, #ADDED BY MARCO
+        generate_new_conformers: bool = True #ADDED BY MARCO
     ) -> None:
         """
         Find the lowest energy conformer of this species. Populates
@@ -1422,8 +1427,17 @@ class Species(AtomCollection):
 
         lmethod = methods.method_or_default_lmethod(lmethod)
 
-        method_log.add("Low energy conformers located with the")
-        self._generate_conformers()
+        if generate_new_conformers:  #ADDED BY MARCO
+            method_log.add("Low energy conformers located with the")  #INDENT ADDED BY MARCO
+            self._generate_conformers() #INDENT ADDED BY MARCO
+
+        #BLOCK ADDED BY MARCO
+        if constraints is not None:
+            logger.info("APPLYING CONSTRAINTS!!")
+            N_conformers = self.n_conformers
+            for conformer_i in range(N_conformers):
+                self.conformers[conformer_i].constraints.cartesian = constraints
+        #END ADDED BY MARCO
 
         # For all generated conformers optimise with the low level of theory
         method_string = f"and optimised using {lmethod.name}"
@@ -1432,7 +1446,8 @@ class Species(AtomCollection):
         method_log.add(f"{method_string}.")
 
         self.conformers.optimise(method=lmethod)
-        self.conformers.prune(remove_no_energy=True)
+        #self.conformers.prune(remove_no_energy=True)   #COMMENTED BY MARCO
+        self.conformers.prune(e_tol = Energy(0.001, 'kcal mol-1'),remove_no_energy=True,prune_higher_energy_sigma=prune_higher_energy_sigma) #ADDED BY MARCO
 
         if hmethod is not None:
             if Config.hmethod_sp_conformers:
@@ -1444,11 +1459,15 @@ class Species(AtomCollection):
                 )
             else:
                 # Otherwise run a full optimisation
-                self.conformers.optimise(hmethod)
-
-        if not allow_connectivity_changes:
-            assert self.graph is not None, "Must have a graph"
-            self.conformers.prune_diff_graph(self.graph)
+                #self.conformers.optimise(hmethod)  #COMMENTED BY MARCO
+                self.conformers.optimise(method=hmethod,keywords=hmethod.keywords.opt) #ADDED BY MARCO
+                self.conformers.prune(e_tol = Energy(0.001, 'kcal mol-1'),remove_no_energy=True,prune_higher_energy_sigma=prune_higher_energy_sigma)  #ADDED prune_higher_energy_sigma=prune_higher_energy_sigma BY MARCO
+        
+        #BLOCK COMMENTED BY MARCO
+        #if not allow_connectivity_changes:
+        #    assert self.graph is not None, "Must have a graph"
+        #    self.conformers.prune_diff_graph(self.graph)
+        #END BLOCK COMMENTED BY MARCO
 
         self._set_lowest_energy_conformer()
         logger.info(f"Lowest energy conformer found. E = {self.energy}")
