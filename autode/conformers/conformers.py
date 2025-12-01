@@ -10,7 +10,7 @@ from autode.mol_graphs import make_graph, is_isomorphic
 from autode.geom import calc_heavy_atom_rmsd
 from autode.log import logger
 from autode.utils import ProcessPool
-from autode.exceptions import NoConformers, CouldNotGetProperty
+from autode.exceptions import NoConformers
 
 
 if TYPE_CHECKING:
@@ -22,14 +22,9 @@ if TYPE_CHECKING:
 
 def _calc_conformer(conformer, calc_type, method, keywords, n_cores=1):
     """Top-level hashable function to call in parallel"""
-    func = getattr(conformer, calc_type)
-    try:
-        func(method=method, keywords=keywords, n_cores=n_cores)
-    except CouldNotGetProperty as e:
-        logger.warning(
-            f"Failed to run calculation on conformer {conformer.name} due to {e}"
-        )
-
+    getattr(conformer, calc_type)(
+        method=method, keywords=keywords, n_cores=n_cores
+    )
     return conformer
 
 
@@ -57,6 +52,7 @@ class Conformers(list):
         rmsd_tol: Union[Distance, float, None] = None,
         n_sigma: float = 5,
         remove_no_energy: bool = False,
+        prune_higher_energy_sigma: float = 2.0,
     ) -> None:
         """
         Prune conformers based on both energy and root mean squared deviation
@@ -78,7 +74,7 @@ class Conformers(list):
         if remove_no_energy:
             self.remove_no_energy()
 
-        self.prune_on_energy(e_tol=e_tol, n_sigma=n_sigma)
+        self.prune_on_energy(e_tol=e_tol, n_sigma=n_sigma, prune_higher_energy_sigma=prune_higher_energy_sigma)
         self.prune_on_rmsd(rmsd_tol=rmsd_tol)
 
         return None
@@ -87,6 +83,7 @@ class Conformers(list):
         self,
         e_tol: Union[Energy, float] = Energy(1.0, "kJ mol-1"),
         n_sigma: float = 5,
+        prune_higher_energy_sigma: float = 2.0,
     ) -> None:
         """
         Prune the conformers based on an energy threshold, discarding those
@@ -102,10 +99,26 @@ class Conformers(list):
             n_sigma (int): Number of standard deviations a conformer energy
                    must be from the average for it not to be added
         """
+        #BLOCK ADDED BY MARCO: because I put E=0 for conformers that didn't converge, instead of stopping autode
+        idxs_with_energy = [
+            idx for idx, conf in enumerate(self) if conf.energy is not None
+        ]
+
+        for i, idx in enumerate(reversed(idxs_with_energy)):
+            conf = self[idx]
+            if conf.energy == 0.0:
+                logger.warning(
+                    f"Conformer {idx} had no energy - removing"
+                )
+                del self[idx]
+        #END BLOCK ADDED BY MARCO
+
         idxs_with_energy = [
             idx for idx, conf in enumerate(self) if conf.energy is not None
         ]
         n_prev_confs = len(self)
+
+        logger.info(f"prune_higher_energy_sigma is {prune_higher_energy_sigma}")
 
         if len(idxs_with_energy) < 2:
             logger.info(
@@ -139,11 +152,20 @@ class Conformers(list):
 
             if np.abs(conf.energy - avg_e) / std_dev_e > n_sigma:
                 logger.warning(
-                    f"Conformer {idx} had an energy >{n_sigma}σ "
+                    f"Conformer {idx} had an |energy| >{n_sigma}σ "
                     f"from the average - removing"
                 )
                 del self[idx]
                 continue
+            #BLOCK ADDED BY MARCO
+            if (conf.energy - avg_e) / std_dev_e > prune_higher_energy_sigma:         #ADDED BY MARCO
+                logger.warning(
+                    f"Conformer {idx} had an energy >{prune_higher_energy_sigma}σ "
+                    f"from the average - removing"
+                )
+                del self[idx]
+                continue
+            #END BLOCK ADDED BY MARCO
 
             if i == 0:
                 # The first (last) conformer must be unique
@@ -230,7 +252,7 @@ class Conformers(list):
 
         for idx in reversed(range(len(self))):
             conformer = self[idx]
-            make_graph(conformer)
+            make_graph(conformer,allow_invalid_valancies=True) #MODIFIED BY MARCO ",allow_invalid_valancies=True"
 
             if not is_isomorphic(
                 conformer.graph, graph, ignore_active_bonds=True
@@ -276,6 +298,7 @@ class Conformers(list):
 
         n_cores_pp = max(Config.n_cores // len(self), 1)
 
+        logger.info(f'Running parallel calc on conformers {self}')  #ADDED BY MARCO, debugging
         with ProcessPool(max_workers=Config.n_cores // n_cores_pp) as pool:
             jobs = [
                 pool.submit(
@@ -308,7 +331,7 @@ class Conformers(list):
 
             keywords (autode.wrappers.keywords.Keywords):
         """
-        return self._parallel_calc("optimise", method, keywords)
+        return self._parallel_calc("optimise", method, keywords) 
 
     def single_point(
         self,
