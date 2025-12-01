@@ -368,8 +368,8 @@ def requires_atoms(func: Callable) -> Callable:
         assert hasattr(args[0], "n_atoms")
 
         if args[0].n_atoms == 0:
-            raise NoAtomsInMolecule
-
+            logger.warning(f'WARNING: no atoms in molecules for {args[0]}!!') #ADDED BY MARCO: I didn't want it to stop
+            #raise NoAtomsInMolecule #COMMENTED BY MARCO
         return func(*args, **kwargs)
 
     return wrapped_function
