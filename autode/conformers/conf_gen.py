@@ -153,9 +153,9 @@ def _get_atoms_rotated_stereocentres(species, atoms, rand):
             continue
 
         # Don't rotate if the bond connecting the centers is a π-bond
-        if species.graph.edges[i, j]["pi"] is True:
-            logger.info("Stereocenters were π bonded – not rotating")
-            continue
+        #if species.graph.edges[i, j]["pi"] is True:        #COMMENTED BY MARCO
+        #    logger.info("Stereocenters were π bonded – not rotating")
+        #    continue
 
         try:
             left_idxs, right_idxs = split_mol_across_bond(
@@ -269,8 +269,8 @@ def _get_non_random_atoms(species):
     ]
 
     non_rand_atoms = deepcopy(stereocentres)
-    for stereocentre in stereocentres:
-        non_rand_atoms += list(species.graph.neighbors(stereocentre))
+    #for stereocentre in stereocentres:     #COMMENTED BY MARCO, TESTING
+    #    non_rand_atoms += list(species.graph.neighbors(stereocentre))
 
     if len(non_rand_atoms) > 0:
         logger.info(f"Not randomising atom index(es) {set(non_rand_atoms)}")
@@ -425,9 +425,12 @@ def get_simanl_atoms(
     # Add distance constraints across stereocentres e.g. for a Z double bond
     # then modify d0 appropriately
     curr_dist_consts = {} if dist_consts is None else dist_consts
-    distance_constraints = _add_dist_consts_for_stereocentres(
-        species=species, dist_consts=curr_dist_consts
-    )
+    #distance_constraints = _add_dist_consts_for_stereocentres(  #COMMENTED BY MARCO
+    #    species=species, dist_consts=curr_dist_consts
+    #)
+    distance_constraints = curr_dist_consts #ADDED BY MARCO
+
+    logger.warning(f'Applied are the following distance constraints: {distance_constraints}')
 
     constrained_bonds = []
     for bond, length in distance_constraints.items():
