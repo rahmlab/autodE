@@ -42,8 +42,19 @@ def get_complex_conformer_atoms(molecules, rotations, points):
     """
     assert len(molecules) - 1 == len(rotations) == len(points) > 0
 
-    # First molecule is static so start with those atoms
-    atoms = deepcopy(molecules[0].atoms)
+    # BLOCK ADDED BY MARCO
+    if molecules[0].n_conformers > 0:
+        logger.info(f"Selecting one random conformer of {molecules[0].name}")
+        random_conf_index = np.random.randint(molecules[0].n_conformers)
+        logger.info(f"Selected conformers number {random_conf_index}")
+        atoms = deepcopy(molecules[0].conformers[random_conf_index].atoms)
+    else:
+        # First molecule is static so start with those atoms
+        atoms = deepcopy(molecules[0].atoms)
+    # END BLOCK BY MARCO
+
+    ## First molecule is static so start with those atoms   #COMMENTED BY MARCO
+    #atoms = deepcopy(molecules[0].atoms)                   #COMMENTED BY MARCO
 
     # For each molecule add it to the current set of atoms with the centroid
     # ~ COM located at the origin
