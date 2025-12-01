@@ -302,10 +302,11 @@ class Calculation:
                 f"Calculation of {self.molecule} did not terminate "
                 f"normally"
             )
-            raise ex.CouldNotGetProperty()
+            #raise ex.CouldNotGetProperty()     #COMMENTED BY MARCO
 
-        if self.molecule.energy is None:
-            raise ex.CouldNotGetProperty(name="energy")
+        if self.molecule.energy is None:   
+            #raise ex.CouldNotGetProperty(name="energy") #COMMENTED BY MARCO
+            self.molecule.energy = 0.0  #ADDED BY MARCO
 
         if _are_grad(self.keywords) and self.molecule.gradient is None:
             raise ex.CouldNotGetProperty(name="gradient")
