@@ -100,7 +100,7 @@ def _get_keywords(calc_input, molecule):
             continue
 
         if isinstance(keyword, kws.MaxOptCycles):
-            continue  # Handled after the full set of keywords is set
+            continue  # Handled after the full set of keywords is set.
 
         elif isinstance(keyword, kws.Keyword):
             kwd_str = keyword.g09 if getattr(keyword, "g09") else keyword.g16
@@ -119,7 +119,8 @@ def _get_keywords(calc_input, molecule):
 
     # Mod redundant keywords is required if there are any constraints or
     # modified internal coordinates
-    if molecule.constraints.any:
+    #if molecule.constraints.any:   #COMMENTED BY MARCO 
+    if molecule.constraints.distance is not None:   #ADDED BY MARCO
         new_keywords.append("Geom=ModRedun")
 
     if calc_input.added_internals is not None:
@@ -144,8 +145,8 @@ def _get_keywords(calc_input, molecule):
     if isinstance(calc_input.keywords, kws.OptKeywords):
         max_cycles = calc_input.keywords.max_opt_cycles
 
-        if max_cycles is not None:
-            _add_opt_option(new_keywords, f"MaxCycles={int(max_cycles)}")
+        if max_cycles is not None:   #MODIFIED BY MARCO, ADDED "and add_max_cycles is not None:"
+            _add_opt_option(new_keywords, f"maxcycles={int(max_cycles)}")   #MODIFIED BY MARCO from "MaxCycles=..."
 
     # By default perform all optimisations without symmetry
     if opt and not any(kw.lower() == "nosymm" for kw in new_keywords):
@@ -197,11 +198,14 @@ def _print_constraints(inp_file, molecule):
             print("B", i + 1, j + 1, dist, "B", file=inp_file)
             print("B", i + 1, j + 1, "F", file=inp_file)
 
-    if molecule.constraints.cartesian is not None:
-        for i in molecule.constraints.cartesian:
-            # Gaussian indexes atoms from 1
-            print("X", i + 1, "F", file=inp_file)
+    #BLOCK COMMENTED BY MARCO
+    #if molecule.constraints.cartesian is not None:
+    #    for i in molecule.constraints.cartesian:
+    #        # Gaussian indexes atoms from 1
+    #        print("X", i + 1, "F", file=inp_file)
+    #END COMMENTED BY MARCO
     return
+
 
 
 def _print_custom_basis(inp_file, calc_input, molecule):
@@ -297,9 +301,11 @@ def _rerun_angle_failure(calc):
                 ]
 
                 for option in options:
+                    logger.info(f'option is {option}')  #ADDED BY MARCO
                     if option.startswith("maxcycles") or option.startswith(
                         "maxstep"
                     ):
+                        logger.warning(f'Removing option {option}!!')   #ADDED BY MARCO
                         options.remove(option)
 
             elif "=" in keyword:
@@ -312,7 +318,7 @@ def _rerun_angle_failure(calc):
 
     # Generate the new calculation and run
     cart_calc.name += "_cartesian"
-    cart_calc.molecule.constraints = Constraints(distance=None, cartesian=None)
+    #cart_calc.molecule.constraints = Constraints(distance=None, cartesian=None)    #COMMENTED BY MARCO
     cart_calc.molecule.reset_graph()
     cart_calc.output = CalculationOutput()
     cart_calc.run()
@@ -430,21 +436,43 @@ class G09(autode.wrappers.methods.ExternalMethodOEGH):
             print(f"\n {calc.name}\n", file=inp_file)
             print(molecule.charge, molecule.mult, file=inp_file)
 
-            for atom in molecule.atoms:
-                x, y, z = atom.coord
-                print(
-                    f"{atom.label:<3} {x:^12.8f} {y:^12.8f} {z:^12.8f}",
-                    file=inp_file,
-                )
+            #BLOCK ADDED BY MARCO
+            if molecule.constraints.cartesian is not None:
+                for idx_count, atom in enumerate(molecule.atoms):
+                    x, y, z = atom.coord
+                    if idx_count in molecule.constraints.cartesian: 
+                        print(
+                            f"{atom.label:<3} -1 {x:^12.8f} {y:^12.8f} {z:^12.8f}",
+                            file=inp_file,
+                        )
+                    else:
+                        print(
+                            f"{atom.label:<3} 0 {x:^12.8f} {y:^12.8f} {z:^12.8f}",
+                            file=inp_file,
+                        )
+            else:   
+            #END BLOCK ADDED BY MARCO
+            #INDENTATION ADDED BY MARCO
+                for atom in molecule.atoms:
+                    x, y, z = atom.coord
+                    print(
+                        f"{atom.label:<3} {x:^12.8f} {y:^12.8f} {z:^12.8f}",
+                        file=inp_file,
+                    )
+            #END INDENTATION ADDED BY MARCO
 
             _print_point_charges(inp_file, calc.input)
             print("", file=inp_file)
             _print_added_internals(inp_file, calc.input)
             _print_constraints(inp_file, molecule)
 
-            if molecule.constraints.any or calc.input.added_internals:
+            #if molecule.constraints.any or calc.input.added_internals:     #COMMENTED BY MARCO
+            if molecule.constraints.distance is not None or calc.input.added_internals: #ADDED BY MARCO: because I changed how constraints.cartesian works
                 print("", file=inp_file)  # needs an extra blank line
             _print_custom_basis(inp_file, calc.input, molecule)
+
+            #ADDED BY MARCO
+            print('eps=144.8\n', file=inp_file)     #HCN custom epsilon
 
             # Gaussian needs blank lines at the end of the file
             print("\n", file=inp_file)
@@ -524,6 +552,9 @@ class G09(autode.wrappers.methods.ExternalMethodOEGH):
 
     def _energy_from(self, calc: "CalculationExecutor") -> PotentialEnergy:
         for line in reversed(calc.output.file_lines):
+            if "SCF has not converged" in line:
+                return None
+
             if "SCF Done" in line or "E(CIS)" in line:
                 return PotentialEnergy((line.split()[4]), units="Ha")
 
@@ -536,17 +567,16 @@ class G09(autode.wrappers.methods.ExternalMethodOEGH):
             if line.startswith(" Energy=") and "NIter=" in line:
                 return PotentialEnergy(line.split()[1], units="Ha")
 
-        raise CouldNotGetProperty(name="energy")
+        logger.info(f'Could not get energy from {self}, {calc}')   #ADDED BY MARCO, debugging
+        return None
+        #return PotentialEnergy(0.0, units="Ha")  #ADDED BY MARCO 
+        #raise CouldNotGetProperty(name="energy")    #COMMENTED BY MARCO
 
     def optimiser_from(self, calc: "CalculationExecutor") -> "BaseOptimiser":
         return G09Optimiser(output_lines=calc.output.file_lines)
 
     def coordinates_from(self, calc: "CalculationExecutor") -> Coordinates:
         """Get the final set of coordinates from a G09 output"""
-        return self._coordinates_from(calc)
-
-    @staticmethod
-    def _coordinates_from(calc: "CalculationExecutor") -> Coordinates:
         coords: List[List[float]] = []
 
         for i, line in enumerate(calc.output.file_lines):
@@ -559,9 +589,6 @@ class G09(autode.wrappers.methods.ExternalMethodOEGH):
                 for xyz_line in xyz_lines:
                     _, _, _, x, y, z = xyz_line.split()
                     coords.append([float(x), float(y), float(z)])
-
-        if len(coords) == 0:
-            raise CouldNotGetProperty(name="coordinates")
 
         return Coordinates(coords, units="Å")
 
@@ -674,22 +701,12 @@ class G09(autode.wrappers.methods.ExternalMethodOEGH):
 
         if len(hess_values) != n * (n + 1) // 2:
             raise CouldNotGetProperty(
-                "Not enough elements of the Hessian matrix found"
+                "Not enough elements of the Hessian " "matrix found"
             )
-
-        """
-        NOTE: Output file for Hessian may contain only Standard orientation
-        coordinates, which break Hessian projection - so in those cases use
-        the original set of coordinates.
-        """
-        try:
-            atoms = self.atoms_from(calc)
-        except CouldNotGetProperty:
-            atoms = calc.molecule.atoms.copy()
 
         return Hessian(
             symm_matrix_from_ltril(hess_values),
-            atoms=atoms,
+            atoms=self.atoms_from(calc),
             functional=calc.input.keywords.functional,
             units="Ha a0^-2",
         ).to("Ha Å^-2")
